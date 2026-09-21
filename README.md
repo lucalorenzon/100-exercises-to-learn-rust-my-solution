@@ -1,22 +1,15 @@
-# Learn Rust, one exercise at a time
+# 100 Exercises to Learn Rust - My Solutions
 
-You've heard about Rust, but you never had the chance to try it out?\
-This course is for you!
+[![Not by AI](https://img.shields.io/badge/Human_made-Not_by_ai-green)](https://notbyai.fyi)
 
-You'll learn Rust by solving 100 exercises.\
-You'll go from knowing nothing about Rust to being able to start
-writing your own programs, one exercise at a time.
+This is a modified README to reflect how the content of this repository differs from the original.
+
+Here are my solutions to the Rust exercises from the public repo: [100 exercises to learn RUST](https://github.com/mainmatter/100-exercises-to-learn-rust/). 
+All exercises were solved entirely without the use of AI.
 
 > [!NOTE]
 > This course has been written by [Mainmatter](https://mainmatter.com/rust-consulting/).\
-> It's one of the trainings in [our portfolio of Rust workshops](https://mainmatter.com/services/workshops/rust/).\
-> Check out our [landing page](https://mainmatter.com/rust-consulting/) if you're looking for Rust consulting or
-> training!
-
-## Getting started
-
-Go to [rust-exercises.com](https://rust-exercises.com) and follow the instructions there
-to get started with the course.
+> It's one of the trainings in [their portfolio of Rust workshops](https://mainmatter.com/services/workshops/rust/).
 
 ## Requirements
 
@@ -24,18 +17,20 @@ to get started with the course.
   If `rustup` is already installed on your system, run `rustup update` (or another appropriate command depending on how
   you installed Rust on your system)
   to make sure you're running on the latest stable version.
-- _(Optional but recommended)_ An IDE with Rust autocompletion support.
-  We recommend one of the following:
-  - [RustRover](https://www.jetbrains.com/rust/);
-  - [Visual Studio Code](https://code.visualstudio.com) with
-    the [`rust-analyzer`](https://marketplace.visualstudio.com/items?itemName=matklad.rust-analyzer) extension.
+- As IDE I've used: [Zed](https://zed.dev/)
 
-## Solutions
+## Original Solutions
 
-You can find the solutions to the exercises in
+You can find the original solutions to the exercises in
 the [`solutions` branch](https://github.com/mainmatter/100-exercises-to-learn-rust/tree/solutions) of this repository.
 
 # License
+- Texts, original code and tests:
 
-Copyright © 2024- Mainmatter GmbH (https://mainmatter.com), released under the
+Copyright © 2024-present Mainmatter GmbH (https://mainmatter.com), released under the
+[Creative Commons Attribution-NonCommercial 4.0 International license](https://creativecommons.org/licenses/by-nc/4.0/).
+
+- Solutions in this repository (my own work, built on the material above; changes made to the original material are indicated in the commit history):
+
+Copyright © 2026 - Luca Lorenzon, released under the
 [Creative Commons Attribution-NonCommercial 4.0 International license](https://creativecommons.org/licenses/by-nc/4.0/).
