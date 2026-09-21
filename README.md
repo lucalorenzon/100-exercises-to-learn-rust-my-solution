@@ -1,6 +1,8 @@
 # 100 Exercises to Learn Rust - My Solutions
 
 [![Not by AI](https://img.shields.io/badge/Human_made-Not_by_ai-green)](https://notbyai.fyi)
+![Progress](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/lucalorenzon/100-exercises-to-learn-rust-my-solution/refs/heads/my-solution/badge.json)
+
 
 This is a modified README to reflect how the content of this repository differs from the original.
 

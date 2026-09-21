@@ -1,0 +1,8 @@
+#!/bin/bash
+WRK_DIR=$(git rev-parse --show-toplevel)
+
+cd  $WRK_DIR
+
+$WRK_DIR/scripts/progress.sh
+
+git add badge.json
