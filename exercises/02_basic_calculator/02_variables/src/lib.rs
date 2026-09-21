@@ -6,9 +6,11 @@
 /// Given the start and end points of a journey, and the time it took to complete it,
 /// calculate the average speed.
 pub fn speed(start: u32, end: u32, time_elapsed: u32) -> u32 {
-    // TODO: define a variable named `distance` with the right value to get tests to pass
+    // define a variable named `distance` with the right value to get tests to pass
     //  Do you need to annotate the type of `distance`? Why or why not?
-
+    // Because all element of the calculation (start and end ) has the same type u32
+    // and that is also ok for the result type u32
+    let distance = end - start;
     // Don't change the line below
     distance / time_elapsed
 }
