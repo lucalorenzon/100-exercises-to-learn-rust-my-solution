@@ -21,7 +21,7 @@ SOLVED_DB="$EX_DIR/progress.db"
 TOTAL_EX=$( find "$EX_DIR" -name Cargo.toml | wc -l )
 TOTAL_EX=${TOTAL_EX//[[:space:]]/}
 
-JSON_TEMPLATE='{"schemaVersion":1,"label":"Progress","message":"__VALUE__%","color":"blue"}'
+JSON_TEMPLATE='{"schemaVersion":1,"label":"Progress","message":"__VALUE__%","color":"blue", "style":"for-the-badge"}'
 
 function calc_perc() {
     if [[ -f $SOLVED_DB && ! -z "$(command -v sqlite3)" && $TOTAL_EX =~ ^[0-9]+$ && (( TOTAL_EX -gt 0)) ]]; then
