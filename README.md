@@ -2,6 +2,7 @@
 
 [![Not by AI](https://img.shields.io/badge/Human_made-Not_by_ai-green?style=for-the-badge)](https://notbyai.fyi)
 ![Progress](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/lucalorenzon/100-exercises-to-learn-rust-my-solution/refs/heads/my-solution/badge.json)
+![Last exercise done](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/lucalorenzon/100-exercises-to-learn-rust-my-solution/refs/heads/my-solution/last_ex_done.json)
 
 
 This is a modified README to reflect how the content of this repository differs from the original.
