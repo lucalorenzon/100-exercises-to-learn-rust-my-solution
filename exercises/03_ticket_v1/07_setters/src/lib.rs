@@ -11,22 +11,9 @@ pub struct Ticket {
 
 impl Ticket {
     pub fn new(title: String, description: String, status: String) -> Ticket {
-        if title.is_empty() {
-            panic!("Title cannot be empty");
-        }
-        if title.len() > 50 {
-            panic!("Title cannot be longer than 50 bytes");
-        }
-        if description.is_empty() {
-            panic!("Description cannot be empty");
-        }
-        if description.len() > 500 {
-            panic!("Description cannot be longer than 500 bytes");
-        }
-        if status != "To-Do" && status != "In Progress" && status != "Done" {
-            panic!("Only `To-Do`, `In Progress`, and `Done` statuses are allowed");
-        }
-
+        Ticket::check_title(title.as_str());
+        Ticket::check_description(description.as_str());
+        Ticket::check_status(status.as_str());
         Ticket {
             title,
             description,
@@ -34,16 +21,55 @@ impl Ticket {
         }
     }
 
+    fn check_title(title: &str) {
+        if title.is_empty() {
+            panic!("Title cannot be empty");
+        }
+        if title.len() > 50 {
+            panic!("Title cannot be longer than 50 bytes");
+        }
+    }
+
+    fn check_description(description: &str) {
+        if description.is_empty() {
+            panic!("Description cannot be empty");
+        }
+        if description.len() > 500 {
+            panic!("Description cannot be longer than 500 bytes");
+        }
+    }
+
+    fn check_status(status: &str) {
+        if status != "To-Do" && status != "In Progress" && status != "Done" {
+            panic!("Only `To-Do`, `In Progress`, and `Done` statuses are allowed");
+        }
+    }
+
     pub fn title(&self) -> &String {
         &self.title
+    }
+
+    pub fn set_title(&mut self, value: String) {
+        Ticket::check_title(value.as_str());
+        self.title = value;
     }
 
     pub fn description(&self) -> &String {
         &self.description
     }
 
+    pub fn set_description(&mut self, value: String) {
+        Ticket::check_description(value.as_str());
+        self.description = value;
+    }
+
     pub fn status(&self) -> &String {
         &self.status
+    }
+
+    pub fn set_status(&mut self, value: String) {
+        Ticket::check_status(value.as_str());
+        self.status = value;
     }
 }
 
