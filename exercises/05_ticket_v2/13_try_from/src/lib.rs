@@ -8,6 +8,31 @@ enum Status {
     Done,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Status can be only one of ToDo InProgress Done and it is case insensitive")]
+struct StatusInvalidError;
+
+impl TryFrom<String> for Status {
+    type Error = StatusInvalidError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Status::try_from(value.as_str())
+    }
+}
+
+impl TryFrom<&str> for Status {
+    type Error = StatusInvalidError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            v if v.eq_ignore_ascii_case("todo") => Ok(Status::ToDo),
+            v if v.eq_ignore_ascii_case("inprogress") => Ok(Status::InProgress),
+            v if v.eq_ignore_ascii_case("done") => Ok(Status::Done),
+            _ => Err(StatusInvalidError),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
