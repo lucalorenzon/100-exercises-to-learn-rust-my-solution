@@ -16,6 +16,18 @@ pub struct TicketStore {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TicketId(u64);
 
+impl From<usize> for TicketId {
+    fn from(value: usize) -> Self {
+        TicketId(value as u64)
+    }
+}
+
+impl From<TicketId> for usize {
+    fn from(value: TicketId) -> Self {
+        value.0 as usize
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ticket {
     pub id: TicketId,
@@ -44,8 +56,20 @@ impl TicketStore {
         }
     }
 
-    pub fn add_ticket(&mut self, ticket: Ticket) {
-        self.tickets.push(ticket);
+    pub fn add_ticket(&mut self, ticket: TicketDraft) -> TicketId {
+        let new_ticket_id: TicketId = self.tickets.len().into();
+        self.tickets.push(Ticket {
+            id: new_ticket_id,
+            title: ticket.title,
+            description: ticket.description,
+            status: Status::ToDo,
+        });
+        new_ticket_id
+    }
+
+    pub fn get(&self, id: TicketId) -> Option<&Ticket> {
+        let idx: usize = id.into();
+        self.tickets.get(idx)
     }
 }
 
@@ -73,7 +97,7 @@ mod tests {
             description: ticket_description(),
         };
         let id2 = store.add_ticket(draft2);
-        let ticket2 = store.get(id2).unwrap();
+        let _ticket2 = store.get(id2).unwrap();
 
         assert_ne!(id1, id2);
     }
