@@ -68,8 +68,7 @@ impl TicketStore {
     }
 
     pub fn get(&self, id: TicketId) -> Option<&Ticket> {
-        let idx: usize = id.into();
-        self.tickets.get(idx)
+        self.tickets.get(usize::from(id))
     }
 }
 
