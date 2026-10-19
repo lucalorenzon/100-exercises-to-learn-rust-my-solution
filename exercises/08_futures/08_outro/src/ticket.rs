@@ -1,8 +1,10 @@
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{description::TicketDescription, status::Status, title::TicketTitle};
 
-#[derive(Clone)] // ticket dto => Clone
+#[derive(Clone, Serialize, Deserialize)] // ticket dto => Clone
 pub struct Ticket {
     pub id: TicketId,
     pub title: TicketTitle,
@@ -10,13 +12,13 @@ pub struct Ticket {
     pub status: Status,
 }
 
-#[derive(Clone)] //dto => Clone
+#[derive(Clone, Serialize, Deserialize)] //dto => Clone
 pub struct DraftTicket {
     pub title: TicketTitle,
     pub description: TicketDescription,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)] // BTreeMap => Ord => PartialOrd => Eq => PartialEq, assert_eq => Debug
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)] // BTreeMap => Ord => PartialOrd => Eq => PartialEq, assert_eq => Debug
 pub struct TicketId(u64);
 
 impl From<u64> for TicketId {
@@ -31,20 +33,32 @@ impl Display for TicketId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct TicketVersion(u64);
 
 #[derive(Debug, thiserror::Error)]
 #[error("VersionTicket too old")]
 pub struct TicketVersionMismatchError;
 
-#[derive(Clone)]
+#[derive(Debug, thiserror::Error)]
+#[error("Max version reached")]
+pub struct TicketVersionMaxReachedError;
+
+#[derive(Debug, thiserror::Error)]
+pub enum TicketVersionError {
+    #[error(transparent)]
+    Mismatch(#[from] TicketVersionMismatchError),
+    #[error(transparent)]
+    MaxReached(#[from] TicketVersionMaxReachedError),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct VersionedTicket {
     ticket: Ticket,
     version: TicketVersion,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct PatchTicket {
     pub title: Option<TicketTitle>,
     pub description: Option<TicketDescription>,
@@ -83,13 +97,16 @@ impl VersionedTicket {
         &mut self,
         version: &TicketVersion,
         patch: PatchTicket,
-    ) -> Result<(), TicketVersionMismatchError> {
+    ) -> Result<(), TicketVersionError> {
         if self.version() == *version {
             self.apply_patch(patch);
-            self.version = TicketVersion(self.version.0 + 1);
+            let Some(new_version) = self.version.0.checked_add(1) else {
+                return Err(TicketVersionMaxReachedError)?;
+            };
+            self.version = TicketVersion(new_version);
             Ok(())
         } else {
-            Err(TicketVersionMismatchError)
+            Err(TicketVersionMismatchError)?
         }
     }
 
@@ -120,8 +137,8 @@ pub mod test {
         description::tests::valid_description,
         status::Status,
         ticket::{
-            DraftTicket, PatchTicket, Ticket, TicketVersion, TicketVersionMismatchError,
-            VersionedTicket,
+            DraftTicket, PatchTicket, Ticket, TicketVersion, TicketVersionError,
+            TicketVersionMaxReachedError, TicketVersionMismatchError, VersionedTicket,
         },
         title::tests::valid_title,
     };
@@ -153,7 +170,28 @@ pub mod test {
 
         let result = example_ticket.try_patch(&1u64.into(), patch);
 
-        assert_matches!(result, Err(TicketVersionMismatchError));
+        assert_matches!(
+            result,
+            Err(TicketVersionError::Mismatch(TicketVersionMismatchError))
+        );
+    }
+
+    #[test]
+    fn should_raise_error_if_try_to_update_reaching_max_version() {
+        let mut example_ticket =
+            valid_versioned_ticket_with(42, "Title", "Description", Status::ToDo, u64::MAX);
+        let patch = PatchTicket {
+            title: "Title modified".try_into().ok(),
+            description: "Description modified".try_into().ok(),
+            status: Some(Status::InProgress),
+        };
+
+        let result = example_ticket.try_patch(&1u64.into(), patch);
+
+        assert_matches!(
+            result,
+            Err(TicketVersionError::MaxReached(TicketVersionMaxReachedError))
+        );
     }
 
     pub fn valid_draft_ticket() -> DraftTicket {

@@ -1,4 +1,6 @@
-#[derive(Debug, PartialEq, Clone)] //unwrap_err => Debug, assert_eq => Partial_eq, Ticket.clone() => Clone
+use serde::{de, Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Clone, Serialize)] //unwrap_err => Debug, assert_eq => Partial_eq, Ticket.clone() => Clone
 pub struct TicketTitle(String);
 
 #[derive(Debug, thiserror::Error)]
@@ -14,7 +16,7 @@ impl TryFrom<&str> for TicketTitle {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            v if v.is_empty() => Err(TicketTitleError::Empty),
+            "" => Err(TicketTitleError::Empty),
             v if v.len() > 50 => Err(TicketTitleError::TooLong),
             _ => Ok(TicketTitle(value.to_string())),
         }
@@ -26,6 +28,16 @@ impl TryFrom<String> for TicketTitle {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         TicketTitle::try_from(value.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TicketTitle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        TicketTitle::try_from(value).map_err(de::Error::custom)
     }
 }
 
@@ -51,6 +63,20 @@ pub mod tests {
     fn test_try_from_long_string() {
         let title = raw_invalid_too_long_title().to_string();
         let err = TicketTitle::try_from(title).unwrap_err();
+        assert_eq!(err.to_string(), "The title cannot be longer than 50 bytes");
+    }
+
+    #[test]
+    fn test_deserialize_empty_title_should_fail() {
+        let title = serde_json::to_string(raw_invalid_empty_title()).unwrap();
+        let err = serde_json::from_str::<TicketTitle>(&title).unwrap_err();
+        assert_eq!(err.to_string(), "The title cannot be empty");
+    }
+
+    #[test]
+    fn test_deserialize_title_too_long_should_fail() {
+        let title = serde_json::to_string(raw_invalid_too_long_title()).unwrap();
+        let err = serde_json::from_str::<TicketTitle>(&title).unwrap_err();
         assert_eq!(err.to_string(), "The title cannot be longer than 50 bytes");
     }
 

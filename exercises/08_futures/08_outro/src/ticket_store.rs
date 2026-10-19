@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
 use crate::status::Status;
 use crate::ticket::{
-    DraftTicket, PatchTicket, Ticket, TicketId, TicketVersion, TicketVersionMismatchError,
-    VersionedTicket,
+    DraftTicket, PatchTicket, Ticket, TicketId, TicketVersion, TicketVersionError,
+    TicketVersionMaxReachedError, TicketVersionMismatchError, VersionedTicket,
 };
 
 #[derive(Clone)]
@@ -16,10 +17,23 @@ pub struct SimpleTicketStore {
 
 #[derive(Debug, thiserror::Error)]
 pub enum TicketUpdateError {
-    #[error("Version mismatch on ticket update")]
+    #[error(transparent)]
     Conflict(#[from] TicketVersionMismatchError),
+    #[error(transparent)]
+    VersionExausted(#[from] TicketVersionMaxReachedError),
     #[error("Ticket to update not found: {0}")]
     NotFound(TicketId),
+}
+
+pub trait ForTicketStorage: Send + Sync {
+    fn add_ticket(&self, draft_ticket: &DraftTicket) -> impl Future<Output = TicketId> + Send;
+    fn get(&self, id: &TicketId) -> impl Future<Output = Option<VersionedTicket>> + Send;
+    fn patch(
+        &self,
+        id: &TicketId,
+        version: &TicketVersion,
+        patch: PatchTicket,
+    ) -> impl Future<Output = Result<VersionedTicket, TicketUpdateError>> + Send;
 }
 
 impl SimpleTicketStore {
@@ -28,12 +42,20 @@ impl SimpleTicketStore {
             storage: Arc::new(RwLock::new(TicketStorage::new())),
         }
     }
+}
 
-    pub async fn add_ticket(&self, draft_ticket: &DraftTicket) -> TicketId {
+impl Default for SimpleTicketStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ForTicketStorage for SimpleTicketStore {
+    async fn add_ticket(&self, draft_ticket: &DraftTicket) -> TicketId {
         self.storage.write().await.add_ticket(draft_ticket.clone())
     }
 
-    pub async fn get(&self, id: &TicketId) -> Option<VersionedTicket> {
+    async fn get(&self, id: &TicketId) -> Option<VersionedTicket> {
         let stored_ticket = {
             let storage = self.storage.read().await;
             storage.get(id)?
@@ -43,7 +65,7 @@ impl SimpleTicketStore {
         Some(ticket)
     }
 
-    pub async fn patch(
+    async fn patch(
         &self,
         id: &TicketId,
         version: &TicketVersion,
@@ -55,7 +77,12 @@ impl SimpleTicketStore {
         };
 
         let mut stored_ticket = stored_ticket.write().await;
-        stored_ticket.try_patch(version, patch)?;
+        stored_ticket
+            .try_patch(version, patch)
+            .map_err(|e| match e {
+                TicketVersionError::Mismatch(e) => TicketUpdateError::Conflict(e),
+                TicketVersionError::MaxReached(e) => TicketUpdateError::VersionExausted(e),
+            })?;
         Ok(stored_ticket.clone())
     }
 }
@@ -99,7 +126,7 @@ mod tests {
         description::TicketDescription,
         status::Status,
         ticket::{test::valid_draft_ticket_with, PatchTicket},
-        ticket_store::SimpleTicketStore,
+        ticket_store::{ForTicketStorage, SimpleTicketStore},
         title::TicketTitle,
     };
 

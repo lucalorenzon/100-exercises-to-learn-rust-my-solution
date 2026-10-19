@@ -1,4 +1,6 @@
-#[derive(Debug, PartialEq, Clone)] // unwrapp_err => Debug, assert_eq => Partial_Eq, Ticket.clone() => Clone
+use serde::{de, Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Clone, Serialize)] // unwrapp_err => Debug, assert_eq => Partial_Eq, Ticket.clone() => Clone
 pub struct TicketDescription(String);
 
 #[derive(Debug, thiserror::Error)]
@@ -14,7 +16,7 @@ impl TryFrom<&str> for TicketDescription {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            v if v.is_empty() => Err(TicketDescriptionError::Empty),
+            "" => Err(TicketDescriptionError::Empty),
             v if v.len() > 50 => Err(TicketDescriptionError::TooLong),
             _ => Ok(TicketDescription(value.to_string())),
         }
@@ -29,8 +31,19 @@ impl TryFrom<String> for TicketDescription {
     }
 }
 
+impl<'de> Deserialize<'de> for TicketDescription {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        TicketDescription::try_from(value).map_err(de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
+
     use super::*;
     use std::convert::TryFrom;
 
@@ -51,6 +64,25 @@ pub mod tests {
     fn test_try_from_long_string() {
         let description = raw_invalid_verly_long_description().to_string();
         let err = TicketDescription::try_from(description).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "The description cannot be longer than 500 bytes"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_empty_description_should_fail() {
+        let description = &raw_invalid_empty_description();
+        let description_json = serde_json::to_string(description).unwrap();
+        let err = serde_json::from_str::<TicketDescription>(&description_json).unwrap_err();
+        assert_eq!(err.to_string(), "The description cannot be empty");
+    }
+
+    #[test]
+    fn test_deserialize_description_too_long_should_fail() {
+        let description = &raw_invalid_verly_long_description();
+        let description_json = serde_json::to_string(description).unwrap();
+        let err = serde_json::from_str::<TicketDescription>(&description_json).unwrap_err();
         assert_eq!(
             err.to_string(),
             "The description cannot be longer than 500 bytes"

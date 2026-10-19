@@ -1,4 +1,6 @@
-#[derive(Debug, PartialEq, Clone)] // assert_eq! => (Debug, PartialEq), Ticket.clone() => Clone
+use serde::{de, Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Clone, Serialize)] // assert_eq! => (Debug, PartialEq), Ticket.clone() => Clone
 pub enum Status {
     ToDo,
     InProgress,
@@ -27,6 +29,16 @@ impl TryFrom<&str> for Status {
             v if v.eq_ignore_ascii_case("done") => Ok(Status::Done),
             _ => Err(StatusInvalidError),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Status {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Status::try_from(value).map_err(de::Error::custom)
     }
 }
 
@@ -63,5 +75,15 @@ mod tests {
     fn test_try_from_invalid() {
         let status = Status::try_from("Invalid");
         assert!(status.is_err());
+    }
+
+    #[test]
+    fn test_deserialize_invalid_should_fail() {
+        let err =
+            serde_json::from_str::<Status>(&serde_json::to_string("Invalid").unwrap()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Status can be only one of ToDo InProgress Done and it is case insensitive"
+        );
     }
 }
