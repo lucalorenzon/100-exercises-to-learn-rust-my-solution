@@ -2,8 +2,16 @@ use std::future::Future;
 
 use crate::{
     ticket::{DraftTicket, PatchTicket, TicketId, TicketVersion, VersionedTicket},
-    ticket_store::{ForTicketStorage, TicketUpdateError},
+    ticket_store::{ForTicketStorage, TicketInsertError, TicketUpdateError},
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum TicketSystemError {
+    #[error(transparent)]
+    InsertError(#[from] TicketInsertError),
+    #[error(transparent)]
+    UpdateError(#[from] TicketUpdateError),
+}
 
 pub struct TicketSystemService<TS: ForTicketStorage> {
     ticket_storage: TS,
@@ -18,19 +26,30 @@ impl<TS: ForTicketStorage> TicketSystemService<TS> {
 }
 
 pub trait ForTicketMgr: Send + Sync {
-    fn add(&self, draft_ticket: &DraftTicket) -> impl Future<Output = TicketId> + Send;
+    fn add(
+        &self,
+        draft_ticket: &DraftTicket,
+    ) -> impl Future<Output = Result<TicketId, TicketSystemError>> + Send;
     fn get(&self, id: &TicketId) -> impl Future<Output = Option<VersionedTicket>> + Send;
     fn patch(
         &self,
         id: &TicketId,
         version: &TicketVersion,
         patch: PatchTicket,
-    ) -> impl Future<Output = Result<VersionedTicket, TicketUpdateError>> + Send;
+    ) -> impl Future<Output = Result<VersionedTicket, TicketSystemError>> + Send;
 }
 
 impl<TS: ForTicketStorage> ForTicketMgr for TicketSystemService<TS> {
-    fn add(&self, draft_ticket: &DraftTicket) -> impl Future<Output = TicketId> + Send {
-        self.ticket_storage.add_ticket(draft_ticket)
+    fn add(
+        &self,
+        draft_ticket: &DraftTicket,
+    ) -> impl Future<Output = Result<TicketId, TicketSystemError>> + Send {
+        async move {
+            self.ticket_storage
+                .add_ticket(draft_ticket)
+                .await
+                .map_err(|e| TicketSystemError::InsertError(e))
+        }
     }
 
     fn get(&self, id: &TicketId) -> impl Future<Output = Option<VersionedTicket>> + Send {
@@ -42,7 +61,12 @@ impl<TS: ForTicketStorage> ForTicketMgr for TicketSystemService<TS> {
         id: &TicketId,
         version: &TicketVersion,
         patch: PatchTicket,
-    ) -> impl Future<Output = Result<VersionedTicket, TicketUpdateError>> + Send {
-        self.ticket_storage.patch(id, version, patch)
+    ) -> impl Future<Output = Result<VersionedTicket, TicketSystemError>> + Send {
+        async move {
+            self.ticket_storage
+                .patch(id, version, patch)
+                .await
+                .map_err(|e| TicketSystemError::UpdateError(e))
+        }
     }
 }

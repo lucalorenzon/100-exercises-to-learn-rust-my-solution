@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
+use serde::Serialize;
 use tokio::sync::RwLock;
 
 use crate::status::Status;
@@ -26,7 +27,10 @@ pub enum TicketUpdateError {
 }
 
 pub trait ForTicketStorage: Send + Sync {
-    fn add_ticket(&self, draft_ticket: &DraftTicket) -> impl Future<Output = TicketId> + Send;
+    fn add_ticket(
+        &self,
+        draft_ticket: &DraftTicket,
+    ) -> impl Future<Output = Result<TicketId, TicketInsertError>> + Send;
     fn get(&self, id: &TicketId) -> impl Future<Output = Option<VersionedTicket>> + Send;
     fn patch(
         &self,
@@ -51,7 +55,7 @@ impl Default for SimpleTicketStore {
 }
 
 impl ForTicketStorage for SimpleTicketStore {
-    async fn add_ticket(&self, draft_ticket: &DraftTicket) -> TicketId {
+    async fn add_ticket(&self, draft_ticket: &DraftTicket) -> Result<TicketId, TicketInsertError> {
         self.storage.write().await.add_ticket(draft_ticket.clone())
     }
 
@@ -92,6 +96,12 @@ struct TicketStorage {
     counter: u64,
 }
 
+#[derive(Debug, thiserror::Error, Serialize)]
+pub enum TicketInsertError {
+    #[error("Max Storage capability reached")]
+    StorageFull,
+}
+
 impl TicketStorage {
     fn new() -> Self {
         Self {
@@ -100,9 +110,12 @@ impl TicketStorage {
         }
     }
 
-    fn add_ticket(&mut self, ticket: DraftTicket) -> TicketId {
+    fn add_ticket(&mut self, ticket: DraftTicket) -> Result<TicketId, TicketInsertError> {
         let id = TicketId::from(self.counter);
-        self.counter += 1;
+        self.counter = self
+            .counter
+            .checked_add(1)
+            .ok_or(TicketInsertError::StorageFull)?;
 
         let ticket = Ticket {
             id,
@@ -112,7 +125,7 @@ impl TicketStorage {
         };
         self.tickets
             .insert(id, Arc::new(RwLock::new(VersionedTicket::new(ticket))));
-        id
+        Ok(id)
     }
 
     fn get(&self, id: &TicketId) -> Option<Arc<RwLock<VersionedTicket>>> {
@@ -122,19 +135,29 @@ impl TicketStorage {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
+    use tokio::sync::RwLock;
+
     use crate::{
         description::TicketDescription,
         status::Status,
-        ticket::{test::valid_draft_ticket_with, PatchTicket},
-        ticket_store::{ForTicketStorage, SimpleTicketStore},
+        ticket::{
+            test::{valid_draft_ticket, valid_draft_ticket_with},
+            PatchTicket,
+        },
+        ticket_store::{ForTicketStorage, SimpleTicketStore, TicketInsertError, TicketStorage},
         title::TicketTitle,
     };
 
     #[tokio::test]
     async fn should_retrive_the_stored_ticket() {
-        let ticket_storage_under_test = SimpleTicketStore::new();
+        let ticket_storage_under_test = create_simple_storage();
         let expected_ticket = valid_draft_ticket_with("title", "description");
-        let ticket_id = ticket_storage_under_test.add_ticket(&expected_ticket).await;
+        let ticket_id = ticket_storage_under_test
+            .add_ticket(&expected_ticket)
+            .await
+            .unwrap();
         let maybe_actual_ticket = ticket_storage_under_test.get(&ticket_id).await;
 
         assert!(!maybe_actual_ticket.is_none());
@@ -151,9 +174,12 @@ mod tests {
 
     #[tokio::test]
     async fn when_added_the_stored_ticket_should_have_status_todo() {
-        let ticket_storage_under_test = SimpleTicketStore::new();
+        let ticket_storage_under_test = create_simple_storage();
         let expected_ticket = valid_draft_ticket_with("title", "description");
-        let ticket_id = ticket_storage_under_test.add_ticket(&expected_ticket).await;
+        let ticket_id = ticket_storage_under_test
+            .add_ticket(&expected_ticket)
+            .await
+            .unwrap();
         let maybe_actual_ticket = ticket_storage_under_test.get(&ticket_id).await;
 
         assert!(!maybe_actual_ticket.is_none());
@@ -164,9 +190,12 @@ mod tests {
 
     #[tokio::test]
     async fn when_added_the_stored_ticket_should_have_the_unique_id_returned() {
-        let ticket_storage_under_test = SimpleTicketStore::new();
+        let ticket_storage_under_test = create_simple_storage();
         let expected_ticket = valid_draft_ticket_with("title", "description");
-        let ticket_id = ticket_storage_under_test.add_ticket(&expected_ticket).await;
+        let ticket_id = ticket_storage_under_test
+            .add_ticket(&expected_ticket)
+            .await
+            .unwrap();
         let maybe_actual_ticket = ticket_storage_under_test.get(&ticket_id).await;
 
         assert!(!maybe_actual_ticket.is_none());
@@ -177,16 +206,18 @@ mod tests {
 
     #[tokio::test]
     async fn should_store_and_retrieve_multiple_tickets() {
-        let ticket_storage_under_test = SimpleTicketStore::new();
+        let ticket_storage_under_test = create_simple_storage();
         let expected_ticket1 = valid_draft_ticket_with("title1", "description1");
         let expected_ticket2 = valid_draft_ticket_with("title2", "description2");
 
         let ticket_id1 = ticket_storage_under_test
             .add_ticket(&expected_ticket1)
-            .await;
+            .await
+            .unwrap();
         let ticket_id2 = ticket_storage_under_test
             .add_ticket(&expected_ticket2)
-            .await;
+            .await
+            .unwrap();
         let actual_ticket1 = ticket_storage_under_test.get(&ticket_id1).await.unwrap();
         let actual_ticket2 = ticket_storage_under_test.get(&ticket_id2).await.unwrap();
 
@@ -212,11 +243,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn should_return_error_if_max_storage_capacity_is_reached() {
+        let ticket_storage_under_test = create_simple_storage_with_counter(u64::MAX);
+        let draft_ticket = valid_draft_ticket();
+        let err = ticket_storage_under_test
+            .add_ticket(&draft_ticket)
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), TicketInsertError::StorageFull.to_string());
+    }
+
+    #[tokio::test]
     async fn should_patch_an_existing_ticket() {
-        let ticket_storage_under_test = SimpleTicketStore::new();
+        let ticket_storage_under_test = create_simple_storage();
         let draft_ticket =
             valid_draft_ticket_with("title to be modified", "description to be modified");
-        let ticket_id = ticket_storage_under_test.add_ticket(&draft_ticket).await;
+        let ticket_id = ticket_storage_under_test
+            .add_ticket(&draft_ticket)
+            .await
+            .unwrap();
         let ticket_to_be_modified = ticket_storage_under_test.get(&ticket_id).await.unwrap();
         let patch = PatchTicket {
             status: Some(Status::InProgress),
@@ -227,5 +272,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(Status::InProgress, modified_ticket.status());
+    }
+
+    fn create_simple_storage() -> SimpleTicketStore {
+        SimpleTicketStore::new()
+    }
+
+    fn create_simple_storage_with_counter(count: u64) -> SimpleTicketStore {
+        SimpleTicketStore {
+            storage: Arc::new(RwLock::new(TicketStorage {
+                tickets: BTreeMap::new(),
+                counter: count,
+            })),
+        }
     }
 }

@@ -1,13 +1,17 @@
-use std::net::SocketAddr;
+use std::{convert::Infallible, net::SocketAddr};
 
-use warp::{filters::BoxedFilter, reply::Response};
+use warp::{reply::Reply, Filter};
 
-pub struct WarpHttpServer {
-    routes: BoxedFilter<(Response,)>,
+pub struct WarpHttpServer<F> {
+    routes: F,
 }
 
-impl WarpHttpServer {
-    pub fn new(routes: BoxedFilter<(Response,)>) -> Self {
+impl<F> WarpHttpServer<F>
+where
+    F: Filter<Error = Infallible> + Clone + Send + Sync + 'static,
+    F::Extract: Reply,
+{
+    pub fn new(routes: F) -> Self {
         Self { routes }
     }
 
