@@ -9,7 +9,7 @@ use warp::{
 };
 
 use crate::{
-    service::{ForTicketMgr, TicketSystemError},
+    service::{ForAddTicket, ForGetTicket, ForPatchTicket, TicketSystemError},
     ticket::{DraftTicket, PatchTicket},
     ticket_store::TicketUpdateError,
 };
@@ -19,7 +19,7 @@ pub async fn handler_ticket_add<T>(
     service: Arc<T>,
 ) -> Result<Response, warp::Rejection>
 where
-    T: ForTicketMgr + 'static,
+    T: ForAddTicket + 'static,
 {
     let request_id = uuid::Uuid::new_v4();
     let span = tracing::info_span!(
@@ -49,7 +49,7 @@ fn invalid_payload(error: serde_json::Error) -> warp::Rejection {
 
 pub async fn handler_ticket_get<T>(id: u64, service: Arc<T>) -> Result<Response, warp::Rejection>
 where
-    T: ForTicketMgr + 'static,
+    T: ForGetTicket + 'static,
 {
     let request_id = uuid::Uuid::new_v4();
     let span = tracing::info_span!(
@@ -75,7 +75,7 @@ pub async fn handler_ticket_patch<T>(
     service: Arc<T>,
 ) -> Result<Response, warp::Rejection>
 where
-    T: ForTicketMgr + 'static,
+    T: ForPatchTicket + 'static,
 {
     let request_id = uuid::Uuid::new_v4();
     let span = tracing::info_span!(
@@ -120,7 +120,7 @@ fn update_error(value: TicketSystemError) -> warp::Rejection {
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-enum HttpError {
+pub enum HttpError {
     InvalidPayload(serde_json::Error),
     InvalidContent(serde_json::Error),
     TicketIdSpaceExhausted(TicketSystemError),
@@ -148,10 +148,7 @@ pub async fn errors_handler(err: warp::Rejection) -> Result<impl Reply, Infallib
             HttpError::TicketVersionConflict(e) => (StatusCode::CONFLICT, e.to_string()),
         }
     } else {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Unknown Error".to_string(),
-        )
+        (StatusCode::NOT_FOUND, "Not Found".to_string())
     };
     let json = warp::reply::json(&serde_json::json!({ "error": msg }));
     Ok(warp::reply::with_status(json, code))

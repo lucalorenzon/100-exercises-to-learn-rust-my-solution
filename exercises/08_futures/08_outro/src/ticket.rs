@@ -19,17 +19,31 @@ pub struct DraftTicket {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)] // BTreeMap => Ord => PartialOrd => Eq => PartialEq, assert_eq => Debug
-pub struct TicketId(u64);
+pub struct TicketId {
+    id: u64,
+}
 
 impl From<u64> for TicketId {
     fn from(value: u64) -> Self {
-        TicketId(value)
+        TicketId { id: value }
+    }
+}
+
+impl From<TicketId> for u64 {
+    fn from(value: TicketId) -> Self {
+        value.id
+    }
+}
+
+impl From<&TicketId> for u64 {
+    fn from(value: &TicketId) -> Self {
+        value.id
     }
 }
 
 impl Display for TicketId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.id)
     }
 }
 
@@ -37,7 +51,7 @@ impl Display for TicketId {
 pub struct TicketVersion(u64);
 
 #[derive(Debug, thiserror::Error)]
-#[error("VersionTicket too old")]
+#[error("VersionTicket in conflit")]
 pub struct TicketVersionMismatchError;
 
 #[derive(Debug, thiserror::Error)]
@@ -186,7 +200,7 @@ pub mod test {
             status: Some(Status::InProgress),
         };
 
-        let result = example_ticket.try_patch(&1u64.into(), patch);
+        let result = example_ticket.try_patch(&u64::MAX.into(), patch);
 
         assert_matches!(
             result,

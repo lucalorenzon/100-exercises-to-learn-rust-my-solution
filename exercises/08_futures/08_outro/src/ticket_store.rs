@@ -134,7 +134,7 @@ impl TicketStorage {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
     use tokio::sync::RwLock;
@@ -143,7 +143,7 @@ mod tests {
         description::TicketDescription,
         status::Status,
         ticket::{
-            test::{valid_draft_ticket, valid_draft_ticket_with},
+            test::{valid_draft_ticket, valid_draft_ticket_with, valid_versioned_ticket_with},
             PatchTicket,
         },
         ticket_store::{ForTicketStorage, SimpleTicketStore, TicketInsertError, TicketStorage},
@@ -274,15 +274,35 @@ mod tests {
         assert_eq!(Status::InProgress, modified_ticket.status());
     }
 
-    fn create_simple_storage() -> SimpleTicketStore {
+    pub fn create_simple_storage() -> SimpleTicketStore {
         SimpleTicketStore::new()
     }
 
-    fn create_simple_storage_with_counter(count: u64) -> SimpleTicketStore {
+    pub fn create_simple_storage_with_counter(count: u64) -> impl ForTicketStorage {
         SimpleTicketStore {
             storage: Arc::new(RwLock::new(TicketStorage {
                 tickets: BTreeMap::new(),
                 counter: count,
+            })),
+        }
+    }
+
+    pub fn create_simple_storage_with_ticket_0_with_specified_version(
+        version: u64,
+    ) -> impl ForTicketStorage {
+        let special_ticket = Arc::new(RwLock::new(valid_versioned_ticket_with(
+            0,
+            "my-titcle",
+            "my-description",
+            Status::ToDo,
+            version,
+        )));
+        let mut tickets = BTreeMap::new();
+        tickets.insert(0.into(), special_ticket);
+        SimpleTicketStore {
+            storage: Arc::new(RwLock::new(TicketStorage {
+                tickets: tickets,
+                counter: 1,
             })),
         }
     }
