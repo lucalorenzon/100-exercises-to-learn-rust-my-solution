@@ -1,6 +1,7 @@
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Clone, Serialize)] // assert_eq! => (Debug, PartialEq), Ticket.clone() => Clone
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub enum Status {
     ToDo,
     InProgress,
@@ -29,16 +30,6 @@ impl TryFrom<&str> for Status {
             v if v.eq_ignore_ascii_case("done") => Ok(Status::Done),
             _ => Err(StatusInvalidError),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Status {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Status::try_from(value).map_err(de::Error::custom)
     }
 }
 

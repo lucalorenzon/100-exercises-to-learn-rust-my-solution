@@ -15,6 +15,6 @@ mod status;
 pub mod ticket;
 pub mod ticket_store;
 mod title;
-pub mod warp_hanlders;
+pub mod warp_handlers;
 pub mod warp_routes;
 pub mod warp_server;

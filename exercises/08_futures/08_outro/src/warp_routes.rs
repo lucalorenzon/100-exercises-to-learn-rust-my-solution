@@ -1,10 +1,12 @@
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
+use tracing::info_span;
 use warp::{
     filters::{
         body,
         header::header,
-        path::{end, param, path},
+        method::{patch, post},
+        path::{end, param},
     },
     reject::Rejection,
     reply::Reply,
@@ -13,8 +15,11 @@ use warp::{
 
 use crate::{
     service::{ForAddTicket, ForGetTicket, ForPatchTicket, ForTicketMgr},
-    warp_hanlders::{errors_handler, handler_ticket_add, handler_ticket_get, handler_ticket_patch},
+    warp_handlers::{errors_handler, handler_ticket_add, handler_ticket_get, handler_ticket_patch},
 };
+
+const MAX_BODY_LENGTH: u64 = 2048;
+const MAX_HEADER_LEN: usize = 255;
 
 pub fn warp_routes<T>(
     service: Arc<T>,
@@ -22,10 +27,26 @@ pub fn warp_routes<T>(
 where
     T: ForTicketMgr + 'static,
 {
-    add_ticket_route(service.clone())
-        .or(get_ticket_route(service.clone()))
-        .or(patch_ticket_route(service.clone()))
+    request_context()
+        .and(
+            add_ticket_route(service.clone())
+                .or(get_ticket_route(service.clone()))
+                .or(patch_ticket_route(service.clone())),
+        )
         .recover(errors_handler)
+        .with(warp::trace(|info| {
+            info_span!(
+                "request",
+                request_id = %uuid::Uuid::new_v4(),
+                method =  %info.method(),
+                path = %info.path(),
+                remote_ip = tracing::field::Empty,
+                x_forwarded_for = tracing::field::Empty,
+                x_real_ip = tracing::field::Empty,
+                user_agent = tracing::field::Empty,
+                ticket_id = tracing::field::Empty
+            )
+        }))
 }
 
 fn add_ticket_route<T>(
@@ -34,10 +55,10 @@ fn add_ticket_route<T>(
 where
     T: ForAddTicket + 'static,
 {
-    warp::post()
-        .and(path("tickets"))
+    warp::path("tickets")
         .and(end())
-        .and(extract_request_context())
+        .and(post())
+        .and(warp::body::content_length_limit(MAX_BODY_LENGTH))
         .and(body::bytes())
         .and(warp::any().map(move || service.clone()))
         .and_then(handler_ticket_add)
@@ -49,11 +70,10 @@ fn get_ticket_route<T>(
 where
     T: ForGetTicket + 'static,
 {
-    warp::get()
-        .and(path("tickets"))
+    warp::path("tickets")
         .and(param::<u64>())
         .and(end())
-        .and(extract_request_context())
+        .and(warp::get())
         .and(warp::any().map(move || service.clone()))
         .and_then(handler_ticket_get)
 }
@@ -64,12 +84,12 @@ fn patch_ticket_route<T>(
 where
     T: ForPatchTicket + 'static,
 {
-    warp::patch()
-        .and(path("tickets"))
+    warp::path("tickets")
         .and(param::<u64>())
         .and(end())
+        .and(patch())
         .and(header::<u64>("x-version"))
-        .and(extract_request_context())
+        .and(warp::body::content_length_limit(MAX_BODY_LENGTH))
         .and(body::bytes())
         .and(warp::any().map(move || service.clone()))
         .and_then(handler_ticket_patch)
@@ -82,20 +102,47 @@ pub struct RequestContext {
     pub(crate) user_agent: Option<String>,
 }
 
+fn request_context() -> impl Filter<Extract = (), Error = Rejection> + Clone {
+    extract_request_context()
+        .map(|ctx: RequestContext| {
+            let span = tracing::Span::current();
+            span.record("remote_ip", ctx.remote_ip.as_deref().unwrap_or(""));
+            span.record(
+                "x_forwarded_for",
+                ctx.forwarded_for.as_deref().unwrap_or(""),
+            );
+            span.record("x_real_ip", ctx.real_ip.as_deref().unwrap_or(""));
+            span.record("user_agent", ctx.user_agent.as_deref().unwrap_or(""));
+        })
+        .untuple_one()
+}
+
 fn extract_request_context() -> impl Filter<Extract = (RequestContext,), Error = Rejection> + Clone
 {
     warp::header::optional::<String>("x-forwarded-for")
-        .and(warp::header::optional::<String>("real-ip"))
+        .and(warp::header::optional::<String>("x-real-ip"))
         .and(warp::addr::remote())
         .and(warp::header::optional::<String>("user-agent"))
         .map(
-            |forwarded_for, real_ip, remote_ip: Option<SocketAddr>, user_agent| RequestContext {
-                forwarded_for,
-                real_ip,
-                remote_ip: remote_ip.map(|s: SocketAddr| s.to_string()),
-                user_agent,
+            |forwarded_for: Option<String>,
+             real_ip: Option<String>,
+             remote_ip: Option<SocketAddr>,
+             user_agent: Option<String>| {
+                RequestContext {
+                    forwarded_for: forwarded_for.as_deref().map(sanitise_value),
+                    real_ip: real_ip.as_deref().map(sanitise_value),
+                    remote_ip: remote_ip.map(|s: SocketAddr| s.to_string()),
+                    user_agent: user_agent.as_deref().map(sanitise_value),
+                }
             },
         )
+}
+
+fn sanitise_value(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_HEADER_LEN)
+        .collect()
 }
 
 #[cfg(test)]
@@ -116,13 +163,13 @@ mod tests {
         },
         status::Status,
         ticket::{
-            DraftTicket, PatchTicket, TicketId, TicketVersionMaxReachedError,
-            TicketVersionMismatchError, VersionedTicket,
+            DraftTicket, PatchTicket, TicketVersionMaxReachedError, TicketVersionMismatchError,
+            VersionedTicket,
         },
         ticket_store::{TicketInsertError, TicketUpdateError},
         title::TicketTitle,
-        warp_hanlders::HttpError,
-        warp_routes::warp_routes,
+        warp_handlers::{HttpError, TicketIdResponse},
+        warp_routes::{warp_routes, MAX_BODY_LENGTH},
     };
 
     #[tokio::test]
@@ -130,21 +177,21 @@ mod tests {
         let service = Arc::new(build_service());
         let draft_ticket = DraftTicket {
             title: "my_title".try_into().unwrap(),
-            description: "my_desciption".try_into().unwrap(),
+            description: "my_description".try_into().unwrap(),
         };
         let route = warp_routes(service);
         let resp = warp::test::request()
             .method("POST")
-            .path(&format!("/tickets"))
+            .path("/tickets")
             .json(&draft_ticket)
             .reply(&route)
             .await;
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers()["content-type"], "application/json");
         let body = resp.into_body();
-        let ticket_id =
-            serde_json::from_slice::<TicketId>(&body).expect("doesn't return a valid json");
-        assert_eq!(ticket_id, 0.into());
+        let ticket_id_resp =
+            serde_json::from_slice::<TicketIdResponse>(&body).expect("doesn't return a valid json");
+        assert_eq!(ticket_id_resp.id, 0.into());
     }
 
     #[tokio::test]
@@ -152,12 +199,12 @@ mod tests {
         let service = Arc::new(build_exhausted_service());
         let draft_ticket = DraftTicket {
             title: "my_title".try_into().unwrap(),
-            description: "my_desciption".try_into().unwrap(),
+            description: "my_description".try_into().unwrap(),
         };
         let route = warp_routes(service);
         let resp = warp::test::request()
             .method("POST")
-            .path(&format!("/tickets"))
+            .path("/tickets")
             .json(&draft_ticket)
             .reply(&route)
             .await;
@@ -175,11 +222,11 @@ mod tests {
     async fn return_the_specified_ticket() {
         let service = Arc::new(build_service());
         let expected_title: TicketTitle = "my_title".try_into().unwrap();
-        let expected_decsription: TicketDescription = "my_desciption".try_into().unwrap();
+        let expected_description: TicketDescription = "my_description".try_into().unwrap();
         let ticket_id = service
-            .add(&DraftTicket {
+            .add(DraftTicket {
                 title: expected_title.clone(),
-                description: expected_decsription.clone(),
+                description: expected_description.clone(),
             })
             .await
             .unwrap();
@@ -196,7 +243,7 @@ mod tests {
             serde_json::from_slice::<VersionedTicket>(&body).expect("doesn't return a valid json");
         assert_eq!(versioned_ticket.id(), ticket_id);
         assert_eq!(versioned_ticket.title(), expected_title);
-        assert_eq!(versioned_ticket.description(), expected_decsription);
+        assert_eq!(versioned_ticket.description(), expected_description);
         assert_eq!(versioned_ticket.version(), 0.into());
     }
 
@@ -215,6 +262,132 @@ mod tests {
         let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
         let expected_json = json!({
             "error": "TicketId 100 not found"
+        });
+        assert_eq!(err_json, expected_json);
+    }
+
+    #[tokio::test]
+    async fn should_patch_the_version_of_the_specified_ticket() {
+        let first_title: TicketTitle = "my_title".try_into().unwrap();
+        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
+        let expected_description: TicketDescription = "my_description".try_into().unwrap();
+        let patch_ticket = PatchTicket {
+            title: Some(expected_title.clone()),
+            ..PatchTicket::default()
+        };
+
+        let service = Arc::new(build_service());
+        let draft_ticket = DraftTicket {
+            title: first_title,
+            description: expected_description.clone(),
+        };
+        let ticket_id = service.add(draft_ticket).await.unwrap();
+        let route = warp_routes(service);
+        let resp = warp::test::request()
+            .method("PATCH")
+            .path(&format!("/tickets/{ticket_id}"))
+            .header("x-version", 0)
+            .json(&patch_ticket)
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+        let body = resp.into_body();
+        let versioned_ticket =
+            serde_json::from_slice::<VersionedTicket>(&body).expect("doesn't return a valid json");
+        assert_eq!(versioned_ticket.id(), 0.into());
+        assert_eq!(versioned_ticket.title(), expected_title);
+        assert_eq!(versioned_ticket.description(), expected_description);
+        assert_eq!(versioned_ticket.status(), Status::ToDo);
+        assert_eq!(versioned_ticket.version(), 1.into());
+    }
+
+    #[tokio::test]
+    async fn should_return_conflict_patching_wrong_version_of_the_specified_ticket() {
+        let first_title: TicketTitle = "my_title".try_into().unwrap();
+        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
+        let expected_description: TicketDescription = "my_description".try_into().unwrap();
+        let patch_ticket = PatchTicket {
+            title: Some(expected_title.clone()),
+            ..PatchTicket::default()
+        };
+
+        let service = Arc::new(build_service());
+        let draft_ticket = DraftTicket {
+            title: first_title,
+            description: expected_description.clone(),
+        };
+        let ticket_id = service.add(draft_ticket).await.unwrap();
+        let route = warp_routes(service);
+        let resp = warp::test::request()
+            .method("PATCH")
+            .path(&format!("/tickets/{ticket_id}"))
+            .header("x-version", 1)
+            .json(&patch_ticket)
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+        let body = resp.into_body();
+        let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
+        let expected_json = json!({
+            "error": &TicketSystemError::UpdateError(TicketUpdateError::Conflict(TicketVersionMismatchError)).to_string()
+        });
+        assert_eq!(err_json, expected_json);
+    }
+
+    #[tokio::test]
+    async fn should_return_expectation_failed_patching_max_version_of_the_specified_ticket() {
+        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
+        let patch_ticket = PatchTicket {
+            title: Some(expected_title.clone()),
+            ..PatchTicket::default()
+        };
+
+        let service = Arc::new(build_service_that_return_ticket_0_with_specified_version(
+            u64::MAX,
+        ));
+        let route = warp_routes(service);
+        let resp = warp::test::request()
+            .method("PATCH")
+            .path("/tickets/0")
+            .header("x-version", u64::MAX)
+            .json(&patch_ticket)
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::EXPECTATION_FAILED);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+        let body = resp.into_body();
+        let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
+        let expected_json = json!({
+            "error": &TicketSystemError::UpdateError(TicketUpdateError::VersionExhausted(TicketVersionMaxReachedError)).to_string()
+        });
+        assert_eq!(err_json, expected_json);
+    }
+
+    #[tokio::test]
+    async fn should_return_not_found_patching_a_not_existing_ticket() {
+        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
+        let patch_ticket = PatchTicket {
+            title: Some(expected_title.clone()),
+            ..PatchTicket::default()
+        };
+
+        let service = Arc::new(build_service());
+        let route = warp_routes(service);
+        let resp = warp::test::request()
+            .method("PATCH")
+            .path("/tickets/0")
+            .header("x-version", 0)
+            .json(&patch_ticket)
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+        let body = resp.into_body();
+        let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
+        let expected_json = json!({
+            "error": &TicketSystemError::UpdateError(TicketUpdateError::NotFound(0.into())).to_string()
         });
         assert_eq!(err_json, expected_json);
     }
@@ -248,128 +421,107 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn should_patch_the_version_of_the_specified_ticket() {
-        let first_title: TicketTitle = "my_title".try_into().unwrap();
-        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
-        let expected_description: TicketDescription = "my_desciption".try_into().unwrap();
-        let patch_ticket = PatchTicket {
-            title: Some(expected_title.clone()),
-            ..PatchTicket::default()
-        };
-
+    async fn should_return_not_allowed_method_if_wrong_method_is_used() {
         let service = Arc::new(build_service());
-        let draft_ticket = DraftTicket {
-            title: first_title,
-            description: expected_description.clone(),
-        };
-        let ticket_id = service.add(&draft_ticket).await.unwrap();
-        let route = warp_routes(service);
+        let route = warp_routes(service.clone());
+        let resp = warp::test::request()
+            .method("DELETE")
+            .path("/tickets/0")
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn should_return_bad_request_if_payload_is_not_valid_json() {
+        let service = Arc::new(build_service());
+        let route = warp_routes(service.clone());
+        let resp = warp::test::request()
+            .method("POST")
+            .path("/tickets")
+            .body("{werwerwerwe")
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn should_return_unprocessable_content_if_payload_cannot_be_deserialized() {
+        let service = Arc::new(build_service());
+        let route = warp_routes(service.clone());
+        let body_with_wrong_description = json!({
+            "title": "my-title",
+            "description": "a".repeat(501)
+        });
+        let resp = warp::test::request()
+            .method("POST")
+            .path("/tickets")
+            .body(body_with_wrong_description.to_string())
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn should_return_bad_request_if_version_header_is_missed() {
+        let service = Arc::new(build_service());
+        let route = warp_routes(service.clone());
         let resp = warp::test::request()
             .method("PATCH")
-            .path(&format!("/tickets/{ticket_id}"))
+            .path("/tickets/0")
+            .header("wrong-header", "invalid")
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn should_return_bad_request_if_invalid_header_value_is_used() {
+        let service = Arc::new(build_service());
+        let route = warp_routes(service.clone());
+        let resp = warp::test::request()
+            .method("PATCH")
+            .path("/tickets/0")
+            .header("x-version", "invalid")
+            .reply(&route)
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.headers()["content-type"], "application/json");
+    }
+
+    #[tokio::test]
+    async fn should_return_length_required_if_a_body_is_missed_in_patch() {
+        let service = Arc::new(build_service());
+        let route = warp_routes(service.clone());
+        let resp = warp::test::request()
+            .method("PATCH")
+            .path("/tickets/0")
             .header("x-version", 0)
-            .json(&patch_ticket)
             .reply(&route)
             .await;
-        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.status(), StatusCode::LENGTH_REQUIRED);
         assert_eq!(resp.headers()["content-type"], "application/json");
-        let body = resp.into_body();
-        let versioned_ticket =
-            serde_json::from_slice::<VersionedTicket>(&body).expect("doesn't return a valid json");
-        assert_eq!(versioned_ticket.id(), 0.into());
-        assert_eq!(versioned_ticket.title(), expected_title);
-        assert_eq!(versioned_ticket.description(), expected_description);
-        assert_eq!(versioned_ticket.status(), Status::ToDo);
-        assert_eq!(versioned_ticket.version(), 1.into());
     }
 
     #[tokio::test]
-    async fn should_return_conflic_patching_wrong_version_of_the_specified_ticket() {
-        let first_title: TicketTitle = "my_title".try_into().unwrap();
-        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
-        let expected_description: TicketDescription = "my_desciption".try_into().unwrap();
-        let patch_ticket = PatchTicket {
-            title: Some(expected_title.clone()),
-            ..PatchTicket::default()
-        };
-
+    async fn should_return_payload_too_large_if_a_body_is_too_big() {
         let service = Arc::new(build_service());
-        let draft_ticket = DraftTicket {
-            title: first_title,
-            description: expected_description.clone(),
-        };
-        let ticket_id = service.add(&draft_ticket).await.unwrap();
-        let route = warp_routes(service);
+        let route = warp_routes(service.clone());
+        let body_too_large = json!({
+            "title": "my-title",
+            "description": "a".repeat(MAX_BODY_LENGTH as usize + 1)
+        });
         let resp = warp::test::request()
-            .method("PATCH")
-            .path(&format!("/tickets/{ticket_id}"))
-            .header("x-version", 1)
-            .json(&patch_ticket)
+            .method("POST")
+            .path("/tickets")
+            .body(body_too_large.to_string())
             .reply(&route)
             .await;
-        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(resp.headers()["content-type"], "application/json");
-        let body = resp.into_body();
-        let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
-        let expected_json = json!({
-            "error": &TicketSystemError::UpdateError(TicketUpdateError::Conflict(TicketVersionMismatchError)).to_string()
-        });
-        assert_eq!(err_json, expected_json);
-    }
-
-    #[tokio::test]
-    async fn should_return_expectation_failed_patching_max_version_of_the_specified_ticket() {
-        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
-        let patch_ticket = PatchTicket {
-            title: Some(expected_title.clone()),
-            ..PatchTicket::default()
-        };
-
-        let service = Arc::new(build_service_that_return_ticket_0_with_specified_version(
-            u64::MAX,
-        ));
-        let route = warp_routes(service);
-        let resp = warp::test::request()
-            .method("PATCH")
-            .path(&format!("/tickets/0"))
-            .header("x-version", u64::MAX)
-            .json(&patch_ticket)
-            .reply(&route)
-            .await;
-        assert_eq!(resp.status(), StatusCode::EXPECTATION_FAILED);
-        assert_eq!(resp.headers()["content-type"], "application/json");
-        let body = resp.into_body();
-        let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
-        let expected_json = json!({
-            "error": &TicketSystemError::UpdateError(TicketUpdateError::VersionExausted(TicketVersionMaxReachedError)).to_string()
-        });
-        assert_eq!(err_json, expected_json);
-    }
-
-    #[tokio::test]
-    async fn should_return_not_found_patching_a_not_existing_ticket() {
-        let expected_title: TicketTitle = "modified_title".try_into().unwrap();
-        let patch_ticket = PatchTicket {
-            title: Some(expected_title.clone()),
-            ..PatchTicket::default()
-        };
-
-        let service = Arc::new(build_service());
-        let route = warp_routes(service);
-        let resp = warp::test::request()
-            .method("PATCH")
-            .path(&format!("/tickets/0"))
-            .header("x-version", 0)
-            .json(&patch_ticket)
-            .reply(&route)
-            .await;
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-        assert_eq!(resp.headers()["content-type"], "application/json");
-        let body = resp.into_body();
-        let err_json: Value = serde_json::from_slice(&body).expect("not a valid json");
-        let expected_json = json!({
-            "error": &TicketSystemError::UpdateError(TicketUpdateError::NotFound(0.into())).to_string()
-        });
-        assert_eq!(err_json, expected_json);
     }
 }

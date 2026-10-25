@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{description::TicketDescription, status::Status, title::TicketTitle};
 
-#[derive(Clone, Serialize, Deserialize)] // ticket dto => Clone
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Ticket {
     pub id: TicketId,
     pub title: TicketTitle,
@@ -12,13 +12,15 @@ pub struct Ticket {
     pub status: Status,
 }
 
-#[derive(Clone, Serialize, Deserialize)] //dto => Clone
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DraftTicket {
     pub title: TicketTitle,
     pub description: TicketDescription,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)] // BTreeMap => Ord => PartialOrd => Eq => PartialEq, assert_eq => Debug
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct TicketId {
     id: u64,
 }
@@ -35,12 +37,6 @@ impl From<TicketId> for u64 {
     }
 }
 
-impl From<&TicketId> for u64 {
-    fn from(value: &TicketId) -> Self {
-        value.id
-    }
-}
-
 impl Display for TicketId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.id)
@@ -51,7 +47,7 @@ impl Display for TicketId {
 pub struct TicketVersion(u64);
 
 #[derive(Debug, thiserror::Error)]
-#[error("VersionTicket in conflit")]
+#[error("VersionTicket in conflict")]
 pub struct TicketVersionMismatchError;
 
 #[derive(Debug, thiserror::Error)]
@@ -72,7 +68,8 @@ pub struct VersionedTicket {
     version: TicketVersion,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PatchTicket {
     pub title: Option<TicketTitle>,
     pub description: Option<TicketDescription>,
@@ -113,14 +110,14 @@ impl VersionedTicket {
         patch: PatchTicket,
     ) -> Result<(), TicketVersionError> {
         if self.version() == *version {
-            self.apply_patch(patch);
             let Some(new_version) = self.version.0.checked_add(1) else {
-                return Err(TicketVersionMaxReachedError)?;
+                return Err(TicketVersionMaxReachedError.into());
             };
             self.version = TicketVersion(new_version);
+            self.apply_patch(patch);
             Ok(())
         } else {
-            Err(TicketVersionMismatchError)?
+            Err(TicketVersionMismatchError.into())
         }
     }
 
@@ -146,6 +143,8 @@ impl From<u64> for TicketVersion {
 #[cfg(test)]
 pub mod test {
     use std::assert_matches;
+
+    use serde_json::json;
 
     use crate::{
         description::tests::valid_description,
@@ -206,6 +205,37 @@ pub mod test {
             result,
             Err(TicketVersionError::MaxReached(TicketVersionMaxReachedError))
         );
+        assert_eq!(example_ticket.title(), "Title".try_into().unwrap());
+        assert_eq!(
+            example_ticket.description(),
+            "Description".try_into().unwrap()
+        );
+        assert_eq!(example_ticket.status(), Status::ToDo);
+        assert_eq!(example_ticket.version(), u64::MAX.into());
+    }
+
+    #[test]
+    fn should_return_error_if_invalid_field_are_used_in_draft_ticket() {
+        let my_fake_json = json!({
+            "title": "title",
+            "description": "description",
+            "titel": "fake title",
+        })
+        .to_string();
+        let res = serde_json::from_str::<DraftTicket>(&my_fake_json).unwrap_err();
+        assert!(res.to_string().contains("unknown field `titel`"));
+    }
+
+    #[test]
+    fn should_return_error_if_invalid_field_are_used_in_patch_ticket() {
+        let my_fake_json = json!({
+            "title": "title",
+            "description": "description",
+            "titel": "fake title",
+        })
+        .to_string();
+        let res = serde_json::from_str::<PatchTicket>(&my_fake_json).unwrap_err();
+        assert!(res.to_string().contains("unknown field `titel`"));
     }
 
     pub fn valid_draft_ticket() -> DraftTicket {

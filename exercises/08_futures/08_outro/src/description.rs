@@ -1,6 +1,7 @@
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Clone, Serialize)] // unwrapp_err => Debug, assert_eq => Partial_Eq, Ticket.clone() => Clone
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct TicketDescription(String);
 
 #[derive(Debug, thiserror::Error)]
@@ -17,7 +18,7 @@ impl TryFrom<&str> for TicketDescription {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             "" => Err(TicketDescriptionError::Empty),
-            v if v.len() > 50 => Err(TicketDescriptionError::TooLong),
+            v if v.len() > 500 => Err(TicketDescriptionError::TooLong),
             _ => Ok(TicketDescription(value.to_string())),
         }
     }
@@ -28,16 +29,6 @@ impl TryFrom<String> for TicketDescription {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         TicketDescription::try_from(value.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for TicketDescription {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        TicketDescription::try_from(value).map_err(de::Error::custom)
     }
 }
 
@@ -62,7 +53,7 @@ pub mod tests {
 
     #[test]
     fn test_try_from_long_string() {
-        let description = raw_invalid_verly_long_description().to_string();
+        let description = raw_invalid_very_long_description().to_string();
         let err = TicketDescription::try_from(description).unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -80,7 +71,7 @@ pub mod tests {
 
     #[test]
     fn test_deserialize_description_too_long_should_fail() {
-        let description = &raw_invalid_verly_long_description();
+        let description = &raw_invalid_very_long_description();
         let description_json = serde_json::to_string(description).unwrap();
         let err = serde_json::from_str::<TicketDescription>(&description_json).unwrap_err();
         assert_eq!(
@@ -89,12 +80,12 @@ pub mod tests {
         );
     }
 
-    pub fn raw_invalid_verly_long_description() -> String {
-        "At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus. Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat.".into()
+    pub fn raw_invalid_very_long_description() -> String {
+        "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempo".into()
     }
 
     pub fn raw_valid_description() -> String {
-        "A description".into()
+        "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi temp".into()
     }
 
     pub fn valid_description() -> TicketDescription {

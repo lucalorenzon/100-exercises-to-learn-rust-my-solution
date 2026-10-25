@@ -8,7 +8,7 @@ use outro_08::{
     warp_server::WarpHttpServer,
 };
 use tracing::info;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
@@ -30,7 +30,6 @@ fn init_observability() {
     tracing_subscriber::fmt()
         .json()
         .flatten_event(true)
-        .with_span_events(FmtSpan::CLOSE)
         .with_current_span(true)
         .with_span_list(false)
         .with_env_filter(

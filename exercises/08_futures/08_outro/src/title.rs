@@ -1,6 +1,7 @@
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Clone, Serialize)] //unwrap_err => Debug, assert_eq => Partial_eq, Ticket.clone() => Clone
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct TicketTitle(String);
 
 #[derive(Debug, thiserror::Error)]
@@ -31,16 +32,6 @@ impl TryFrom<String> for TicketTitle {
     }
 }
 
-impl<'de> Deserialize<'de> for TicketTitle {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        TicketTitle::try_from(value).map_err(de::Error::custom)
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -49,7 +40,7 @@ pub mod tests {
     #[test]
     fn test_try_from_string() {
         let expected_title = raw_valid_title();
-        let title = TicketTitle::try_from(expected_title.to_string()).unwrap(); // to test the try_from<String>
+        let title = TicketTitle::try_from(expected_title.to_string()).unwrap();
         assert_eq!(title.0, expected_title);
     }
 
@@ -61,7 +52,7 @@ pub mod tests {
 
     #[test]
     fn test_try_from_long_string() {
-        let title = raw_invalid_too_long_title().to_string();
+        let title = raw_invalid_51_chars_long_title().to_string();
         let err = TicketTitle::try_from(title).unwrap_err();
         assert_eq!(err.to_string(), "The title cannot be longer than 50 bytes");
     }
@@ -75,21 +66,21 @@ pub mod tests {
 
     #[test]
     fn test_deserialize_title_too_long_should_fail() {
-        let title = serde_json::to_string(raw_invalid_too_long_title()).unwrap();
+        let title = serde_json::to_string(raw_invalid_51_chars_long_title()).unwrap();
         let err = serde_json::from_str::<TicketTitle>(&title).unwrap_err();
         assert_eq!(err.to_string(), "The title cannot be longer than 50 bytes");
     }
 
     pub fn raw_valid_title() -> &'static str {
-        "A simple valid title"
+        "Sed ut perspiciatis unde omnis iste natus error si"
     }
 
     pub fn valid_title() -> TicketTitle {
         TicketTitle::try_from(raw_valid_title()).unwrap()
     }
 
-    pub fn raw_invalid_too_long_title() -> &'static str {
-        "A title that's definitely longer than what should be allowed in a development ticket"
+    pub fn raw_invalid_51_chars_long_title() -> &'static str {
+        "Sed ut perspiciatis unde omnis iste natus error sit"
     }
 
     pub fn raw_invalid_empty_title() -> &'static str {

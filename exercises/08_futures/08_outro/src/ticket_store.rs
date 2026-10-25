@@ -21,7 +21,7 @@ pub enum TicketUpdateError {
     #[error(transparent)]
     Conflict(#[from] TicketVersionMismatchError),
     #[error(transparent)]
-    VersionExausted(#[from] TicketVersionMaxReachedError),
+    VersionExhausted(#[from] TicketVersionMaxReachedError),
     #[error("Ticket to update not found: {0}")]
     NotFound(TicketId),
 }
@@ -29,7 +29,7 @@ pub enum TicketUpdateError {
 pub trait ForTicketStorage: Send + Sync {
     fn add_ticket(
         &self,
-        draft_ticket: &DraftTicket,
+        draft_ticket: DraftTicket,
     ) -> impl Future<Output = Result<TicketId, TicketInsertError>> + Send;
     fn get(&self, id: &TicketId) -> impl Future<Output = Option<VersionedTicket>> + Send;
     fn patch(
@@ -55,8 +55,8 @@ impl Default for SimpleTicketStore {
 }
 
 impl ForTicketStorage for SimpleTicketStore {
-    async fn add_ticket(&self, draft_ticket: &DraftTicket) -> Result<TicketId, TicketInsertError> {
-        self.storage.write().await.add_ticket(draft_ticket.clone())
+    async fn add_ticket(&self, draft_ticket: DraftTicket) -> Result<TicketId, TicketInsertError> {
+        self.storage.write().await.add_ticket(draft_ticket)
     }
 
     async fn get(&self, id: &TicketId) -> Option<VersionedTicket> {
@@ -85,7 +85,7 @@ impl ForTicketStorage for SimpleTicketStore {
             .try_patch(version, patch)
             .map_err(|e| match e {
                 TicketVersionError::Mismatch(e) => TicketUpdateError::Conflict(e),
-                TicketVersionError::MaxReached(e) => TicketUpdateError::VersionExausted(e),
+                TicketVersionError::MaxReached(e) => TicketUpdateError::VersionExhausted(e),
             })?;
         Ok(stored_ticket.clone())
     }
@@ -151,11 +151,11 @@ pub mod tests {
     };
 
     #[tokio::test]
-    async fn should_retrive_the_stored_ticket() {
+    async fn should_retrieve_the_stored_ticket() {
         let ticket_storage_under_test = create_simple_storage();
         let expected_ticket = valid_draft_ticket_with("title", "description");
         let ticket_id = ticket_storage_under_test
-            .add_ticket(&expected_ticket)
+            .add_ticket(expected_ticket)
             .await
             .unwrap();
         let maybe_actual_ticket = ticket_storage_under_test.get(&ticket_id).await;
@@ -177,7 +177,7 @@ pub mod tests {
         let ticket_storage_under_test = create_simple_storage();
         let expected_ticket = valid_draft_ticket_with("title", "description");
         let ticket_id = ticket_storage_under_test
-            .add_ticket(&expected_ticket)
+            .add_ticket(expected_ticket)
             .await
             .unwrap();
         let maybe_actual_ticket = ticket_storage_under_test.get(&ticket_id).await;
@@ -193,7 +193,7 @@ pub mod tests {
         let ticket_storage_under_test = create_simple_storage();
         let expected_ticket = valid_draft_ticket_with("title", "description");
         let ticket_id = ticket_storage_under_test
-            .add_ticket(&expected_ticket)
+            .add_ticket(expected_ticket)
             .await
             .unwrap();
         let maybe_actual_ticket = ticket_storage_under_test.get(&ticket_id).await;
@@ -211,11 +211,11 @@ pub mod tests {
         let expected_ticket2 = valid_draft_ticket_with("title2", "description2");
 
         let ticket_id1 = ticket_storage_under_test
-            .add_ticket(&expected_ticket1)
+            .add_ticket(expected_ticket1)
             .await
             .unwrap();
         let ticket_id2 = ticket_storage_under_test
-            .add_ticket(&expected_ticket2)
+            .add_ticket(expected_ticket2)
             .await
             .unwrap();
         let actual_ticket1 = ticket_storage_under_test.get(&ticket_id1).await.unwrap();
@@ -247,7 +247,7 @@ pub mod tests {
         let ticket_storage_under_test = create_simple_storage_with_counter(u64::MAX);
         let draft_ticket = valid_draft_ticket();
         let err = ticket_storage_under_test
-            .add_ticket(&draft_ticket)
+            .add_ticket(draft_ticket)
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), TicketInsertError::StorageFull.to_string());
@@ -259,7 +259,7 @@ pub mod tests {
         let draft_ticket =
             valid_draft_ticket_with("title to be modified", "description to be modified");
         let ticket_id = ticket_storage_under_test
-            .add_ticket(&draft_ticket)
+            .add_ticket(draft_ticket)
             .await
             .unwrap();
         let ticket_to_be_modified = ticket_storage_under_test.get(&ticket_id).await.unwrap();
@@ -292,7 +292,7 @@ pub mod tests {
     ) -> impl ForTicketStorage {
         let special_ticket = Arc::new(RwLock::new(valid_versioned_ticket_with(
             0,
-            "my-titcle",
+            "my-title",
             "my-description",
             Status::ToDo,
             version,
@@ -301,7 +301,7 @@ pub mod tests {
         tickets.insert(0.into(), special_ticket);
         SimpleTicketStore {
             storage: Arc::new(RwLock::new(TicketStorage {
-                tickets: tickets,
+                tickets,
                 counter: 1,
             })),
         }

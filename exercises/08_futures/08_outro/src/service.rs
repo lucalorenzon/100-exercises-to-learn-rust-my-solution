@@ -28,7 +28,7 @@ impl<TS: ForTicketStorage> TicketSystemService<TS> {
 pub trait ForAddTicket: Send + Sync {
     fn add(
         &self,
-        draft_ticket: &DraftTicket,
+        draft_ticket: DraftTicket,
     ) -> impl Future<Output = Result<TicketId, TicketSystemError>> + Send;
 }
 
@@ -48,16 +48,11 @@ pub trait ForPatchTicket: Send + Sync {
 pub trait ForTicketMgr: ForAddTicket + ForGetTicket + ForPatchTicket + Send + Sync {}
 
 impl<TS: ForTicketStorage> ForAddTicket for TicketSystemService<TS> {
-    fn add(
-        &self,
-        draft_ticket: &DraftTicket,
-    ) -> impl Future<Output = Result<TicketId, TicketSystemError>> + Send {
-        async move {
-            self.ticket_storage
-                .add_ticket(draft_ticket)
-                .await
-                .map_err(|e| TicketSystemError::InsertError(e))
-        }
+    async fn add(&self, draft_ticket: DraftTicket) -> Result<TicketId, TicketSystemError> {
+        self.ticket_storage
+            .add_ticket(draft_ticket)
+            .await
+            .map_err(TicketSystemError::InsertError)
     }
 }
 
@@ -68,18 +63,16 @@ impl<TS: ForTicketStorage> ForGetTicket for TicketSystemService<TS> {
 }
 
 impl<TS: ForTicketStorage> ForPatchTicket for TicketSystemService<TS> {
-    fn patch(
+    async fn patch(
         &self,
         id: &TicketId,
         version: &TicketVersion,
         patch: PatchTicket,
-    ) -> impl Future<Output = Result<VersionedTicket, TicketSystemError>> + Send {
-        async move {
-            self.ticket_storage
-                .patch(id, version, patch)
-                .await
-                .map_err(|e| TicketSystemError::UpdateError(e))
-        }
+    ) -> Result<VersionedTicket, TicketSystemError> {
+        self.ticket_storage
+            .patch(id, version, patch)
+            .await
+            .map_err(TicketSystemError::UpdateError)
     }
 }
 
@@ -114,7 +107,7 @@ pub mod tests {
             description: "my-description".try_into().unwrap(),
         };
         let service = build_service();
-        let ticket_id = service.add(&draft_ticket).await.unwrap();
+        let ticket_id = service.add(draft_ticket).await.unwrap();
         assert_eq!(ticket_id, 0.into());
     }
 
@@ -125,7 +118,7 @@ pub mod tests {
             description: "my-description".try_into().unwrap(),
         };
         let service = build_exhausted_service();
-        let err = service.add(&draft_ticket).await.unwrap_err();
+        let err = service.add(draft_ticket).await.unwrap_err();
         assert_eq!(
             err.to_string(),
             TicketSystemError::InsertError(TicketInsertError::StorageFull).to_string()
@@ -141,7 +134,7 @@ pub mod tests {
             description: expected_description.clone(),
         };
         let service = build_service();
-        let ticket_id = service.add(&draft_ticket).await.unwrap();
+        let ticket_id = service.add(draft_ticket).await.unwrap();
 
         let versioned_ticket = service.get(&ticket_id).await.unwrap();
         assert_eq!(versioned_ticket.id(), ticket_id);
@@ -168,7 +161,7 @@ pub mod tests {
             description: expected_description.clone(),
         };
         let service = build_service();
-        let ticket_id = service.add(&draft_ticket).await.unwrap();
+        let ticket_id = service.add(draft_ticket).await.unwrap();
 
         let versioned_ticket = service.get(&ticket_id).await.unwrap();
         let versioned_ticket = service
@@ -199,7 +192,7 @@ pub mod tests {
             description: expected_description.clone(),
         };
         let service = build_service();
-        let ticket_id = service.add(&draft_ticket).await.unwrap();
+        let ticket_id = service.add(draft_ticket).await.unwrap();
 
         let versioned_ticket = service.get(&ticket_id).await.unwrap();
         let Err(err) = service
@@ -243,7 +236,7 @@ pub mod tests {
 
         assert_eq!(
             err.to_string(),
-            TicketSystemError::UpdateError(TicketUpdateError::VersionExausted(
+            TicketSystemError::UpdateError(TicketUpdateError::VersionExhausted(
                 TicketVersionMaxReachedError
             ))
             .to_string()
