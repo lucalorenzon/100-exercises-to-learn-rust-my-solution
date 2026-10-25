@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 use warp::{
     filters::{
@@ -37,6 +37,7 @@ where
     warp::post()
         .and(path("tickets"))
         .and(end())
+        .and(extract_request_context())
         .and(body::bytes())
         .and(warp::any().map(move || service.clone()))
         .and_then(handler_ticket_add)
@@ -52,6 +53,7 @@ where
         .and(path("tickets"))
         .and(param::<u64>())
         .and(end())
+        .and(extract_request_context())
         .and(warp::any().map(move || service.clone()))
         .and_then(handler_ticket_get)
 }
@@ -67,9 +69,33 @@ where
         .and(param::<u64>())
         .and(end())
         .and(header::<u64>("x-version"))
+        .and(extract_request_context())
         .and(body::bytes())
         .and(warp::any().map(move || service.clone()))
         .and_then(handler_ticket_patch)
+}
+
+pub struct RequestContext {
+    pub(crate) forwarded_for: Option<String>,
+    pub(crate) real_ip: Option<String>,
+    pub(crate) remote_ip: Option<String>,
+    pub(crate) user_agent: Option<String>,
+}
+
+fn extract_request_context() -> impl Filter<Extract = (RequestContext,), Error = Rejection> + Clone
+{
+    warp::header::optional::<String>("x-forwarded-for")
+        .and(warp::header::optional::<String>("real-ip"))
+        .and(warp::addr::remote())
+        .and(warp::header::optional::<String>("user-agent"))
+        .map(
+            |forwarded_for, real_ip, remote_ip: Option<SocketAddr>, user_agent| RequestContext {
+                forwarded_for,
+                real_ip,
+                remote_ip: remote_ip.map(|s: SocketAddr| s.to_string()),
+                user_agent,
+            },
+        )
 }
 
 #[cfg(test)]
